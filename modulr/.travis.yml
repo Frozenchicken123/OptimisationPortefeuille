@@ -1,0 +1,59 @@
+language: R
+sudo: false
+cache: packages
+
+matrix:
+  include:
+    - os: linux
+      r: oldrel
+      r_build_args: '--no-build-vignettes'
+      r_check_args: '--no-vignettes'
+    - os: linux
+      r: release
+      r_build_args: '--no-build-vignettes'
+      r_check_args: '--no-vignettes'
+    - os: linux
+      r: devel
+      r_build_args: '--no-build-vignettes'
+      r_check_args: '--no-vignettes'
+    - os: linux
+      dist: trusty
+      env: R_CODECOV=true
+      r_build_args: '--no-build-vignettes'
+      r_check_args: '--no-vignettes'
+#    - os: osx
+#      osx_image: xcode8.3
+#      brew_packages: openssl
+#      latex: false
+#      r_build_args: '--no-build-vignettes'
+#      r_check_args: '--no-vignettes'
+#    - os: osx
+#      osx_image: xcode7.3
+#      brew_packages: openssl
+#      latex: false
+#      r_build_args: '--no-build-vignettes'
+#      r_check_args: '--no-vignettes'
+#    - os: osx
+#      osx_image: beta-xcode6.4
+#      brew_packages: openssl
+#      latex: false
+#      r_build_args: '--no-build-vignettes'
+#      r_check_args: '--no-vignettes'
+
+warnings_are_errors: false
+
+r_github_packages:
+  - mattflor/chorddiag
+  - hadley/assertthat
+  - hadley/testthat
+  - wch/webshot
+  - jimhester/covr
+  - jimhester/lintr
+
+notifications:
+  email:
+    on_success: change
+    on_failure: change
+
+after_success:
+  - if [[ "${R_CODECOV}" ]]; then R -e 'covr::codecov()'; fi

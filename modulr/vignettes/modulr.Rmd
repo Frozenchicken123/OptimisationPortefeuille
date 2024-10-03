@@ -1,0 +1,870 @@
+--- 
+title: 
+  "Introduction to modulr" 
+output: 
+  rmarkdown::html_vignette:
+    toc: true
+vignette: > 
+  %\VignetteIndexEntry{Introduction to modulr} 
+  %\VignetteEngine{knitr::rmarkdown} 
+  %\VignetteEncoding{UTF-8}{inputenc} 
+---
+
+```{r, echo = FALSE, message = FALSE, results = 'hide'} 
+set.seed(1234L) 
+modules_path <- file.path(
+  if (grepl("/docs/", getwd(), fixed = TRUE)) file.path("..", "..") else "..", 
+  "inst", "modules")
+library(modulr) 
+library(networkD3)
+library(chorddiag)
+library(RColorBrewer)
+library(memoise)
+library(devtools)
+options(knitr.duplicate.label = 'allow')
+`%<=%` <- modulr::`%<=%` 
+Sys.setlocale("LC_TIME", "en_DK.UTF-8") 
+Sys.setenv(TZ = 'UTC') 
+knitr::opts_chunk$set(
+  collapse = TRUE, 
+  comment = "#>", 
+  fig.path = "./figures/modulr-",
+  fig.width = 6.0, 
+  fig.height = 4.0, 
+  out.width = "90%", 
+  fig.align = "center"
+) 
+BUILD <- 
+  identical(tolower(Sys.getenv("BUILD")), "true") &&
+  !identical(tolower(Sys.getenv("TRAVIS")), "true") && 
+  identical(tolower(Sys.getenv("NOT_CRAN")), "true")
+knitr::opts_chunk$set(purl = BUILD)
+gears_path <- file.path(tempdir(), "gears")
+unlink(gears_path, recursive = TRUE)
+options(modulr.gears_path = gears_path)
+reset <- function() {
+  modulr::reset()
+  root_config$set(modules_path)
+}
+```
+
+# Anatomy of a module
+
+Modules are defined in a declarative way, using the keywords `%requires%`
+and `%provides%`, and have four main components:
+
+* A __name__, which identifies the module. 
+* A list of required __dependencies__, if any. 
+* A __provider__, which expresses the module's feature(s). 
+* Optional __docstrings__, intended to document the internals of a module.
+
+A typical module looks like the following:
+
+```r
+"name_of_module" %requires% list(
+
+  # A list of dependencies.
+  dependency_1 = "name_of_dependency_1", 
+  dependency_2 = "name_of_dependency_1",
+  ... = "..."
+
+) %provides% {
+
+  #' A recommended docstring intended to document the internals of the module.
+
+  # A section where add-on packages are loaded and attached.
+  library(package_1)
+  library(package_2)
+  library(...)
+
+  # Some code that uses the objects `dependency_1` and `dependency_2" 
+  # returned by the modules "name_of_dependency_1" and "name_of_dependency_2".
+  object <- { ... }
+
+  # A resulting object, which can be directly consumed or in turn injected as a 
+  # dependency.
+  return(object)
+
+} 
+```
+
+When a module is defined, modulr has to _make_ it in order to evaluate the code
+it provides:
+
+```r
+result <- make("name_of_module") 
+```
+
+or with a handy _syntactic sugar_:
+
+```r
+result %<=% "name_of_module" 
+```
+
+or interactively with the `hit` function:
+
+```r
+hit(name_of_module) # or
+hit(name_of) # which will prompt the user to choose among all possible match
+```
+
+The result contains the computed object exposed by the module. Under the
+hood, the dependencies have been sorted and appropriately made, and their 
+resulting objects injected where required.
+
+# A first working example
+
+```{r, echo=FALSE, results='hide', message=FALSE} 
+reset() 
+```
+
+Let us start by defining some modules and dependencies:
+
+```{r} 
+"foo" %provides% "Hello"
+
+"bar" %provides% "World"
+
+"baz" %provides% "!"
+
+"foobar" %requires% list(
+  f = "foo", 
+  b = "bar",
+  z = "baz"
+) %provides% { 
+  #' Return a concatenated string. 
+  paste0(f, ", ", tolower(b), z) 
+} 
+```
+
+Use `info` to output the docstrings:
+
+```{r} 
+info("foobar") 
+```
+
+Use `lsmod` to list all defined modules and their properties in a data frame:
+
+```{r} 
+lsmod(cols = c("name", "type", "dependencies", "uses", "size", "modified")) 
+```
+
+In this example, `foobar` relies on three dependencies, and `foo`, `bar` and `baz` are both injected once. 
+Use `plot_dependencies` to see these relations:
+
+```{r plot-foobar-deps} 
+plot_dependencies() 
+```
+
+```{r plot-foobar-deps-chord} 
+plot_dependencies(render_engine = chord_engine) 
+```
+
+Use `make` to get the resulting object provided by the module:
+
+```{r} 
+make("foobar")
+```
+
+Voilà! All the depencencies have been evaluated, injected and processed to return the expected `"Hello, world!"`. As a matter of fact, the dependencies form a [directed acyclic graph](https://en.wikipedia.org/wiki/Directed_acyclic_graph) which is topologically sorted, just in time to determine a well ordering for their evaluation before injection.
+
+```{r} 
+lsmod(cols = c("name", "type", "dependencies", "uses", "size", "modified")) 
+```
+
+# Types of modules
+
+## Singletons
+
+```{r, echo=FALSE, results='hide', message=FALSE}
+reset()
+```
+
+All modules are singletons: once evaluated, they always return the same resulting object. This is one of the great advantages of modulr: module evaluation takes place parsimoniously, when changes are detected or explicitely required, à la [GNU Make](https://www.gnu.org/software/make).
+
+```{r}
+"timestamp" %provides% {
+  #' Return a string containing a timestamp.
+  format(Sys.time(), "%H:%M:%OS6")
+}
+```
+
+Successive `make` calls on the module will not imply its re-evaluation:
+
+```{r}
+make("timestamp")
+with_verbosity(0, make("timestamp")) # temporarily change the verbosity of make
+```
+
+Notice the `with_verbosity` wrapper around the call. To force re-evaluation, just `touch` the module:
+
+```{r}
+touch("timestamp")
+make("timestamp")
+```
+
+Any change of the module's definition (even its docstrings) will be detected:
+
+```{r}
+"timestamp" %provides% {
+  #' Return a string containing a timestamp with more information.
+  format(Sys.time(), "%Y-%m-%d %H:%M:%OS6")
+}
+
+make("timestamp")
+```
+
+## Prototypes
+
+```{r, echo=FALSE, results='hide', message=FALSE}
+reset()
+```
+
+It is granted that all modules are singletons. Nonetheless, a module is allowed to return any object, in particular it can return a function (closure) that itself returns a desired object or produces some side effect. In this case, such a module behaves like a so-called _prototype_.
+
+```{r}
+"timestamp" %provides% {
+  function() format(Sys.time(), "%H:%M:%OS6")
+}
+```
+
+```{r}
+make("timestamp")()
+
+with_verbosity(0L, make("timestamp")())
+```
+
+It is important to emphasize that the module is still a singleton: the second `make` call doesn't re-evaluate. But the function that is returned by the module is itself re-evaluated each time it is called. 
+
+## Memoised prototypes
+
+```{r, echo=FALSE, results='hide', message=FALSE}
+reset()
+```
+
+Singletons produce cached objects at make-time and prototypes produce computed objects at run-time. In a complementary manner, memoised modules produce cached objects at run-time. [Memoisation](https://en.wikipedia.org/wiki/Memoization) and [Hadley Wickam's memoise package](https://github.com/hadley/memoise) give an elegant solution to this requirement.
+
+To see the essence of what is happening, we decrease the verbosity of modulr and set up a simple starting scenario: `foo` requires the somewhat resource-consuming `timestamp` module, defined as a singleton:
+
+```{r}
+set_verbosity(1L) # messages are shown only when changes occur
+
+"timestamp" %provides% {
+  # This is a singleton.
+  message("'timestamp' is evaluated after a (short) pause...")
+  Sys.sleep(1L)
+  format(Sys.time(), "%H:%M:%OS6")
+}
+
+"foo" %requires% list(
+  timestamp = "timestamp"
+) %provides% {
+  "foo"
+}
+
+system.time(make("foo"))
+```
+
+In this example, `timestamp` is evaluated even though it is not explicitely used by `foo`. It just computes a timestamp after a short pause, but it could be virtually very resource-consuming at make-time.
+
+Let us re-define `timestamp` as a prototype:
+
+```{r}
+"timestamp" %provides% {
+  # This is a prototype.
+  function() {
+    message("'timestamp' is evaluated after a (short) pause...")
+    Sys.sleep(1L)
+    format(Sys.time(), "%H:%M:%OS6")
+  }
+}
+
+system.time(make("foo"))
+```
+
+Here, the evaluation consists of defining a function that pauses for a while and returns a timestamp, only when the function is explicitely called. Even if the computation encapsulated by the function is very resource-consuming, no evaluation of the returned function takes place at make-time.
+
+Finally, let us re-define `timestamp` as a memoised module:
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+library(memoise)
+```
+
+```{r}
+"timestamp" %provides% {
+  # This is a memoised module.
+  memoise::memoise(
+    function() {
+      message("'timestamp' is evaluated after a (short) pause...")
+      Sys.sleep(1L)
+      format(Sys.time(), "%H:%M:%OS6")
+    }
+  )
+}
+
+system.time(make("foo"))
+```
+
+The `timestamp` module returns a function which will be evaluated only when explicitely called at run-time. Let us re-define `foo` in order that it effectively uses `timestamp`.
+
+```{r}
+"foo" %requires% list(
+  timestamp = "timestamp"
+) %provides% {
+  message("It is ", timestamp())
+  "foo"
+}
+
+system.time(make("foo"))
+```
+
+Here, a timestamped message is outputed. Let us force the re-evaluation of `foo`.
+
+```{r}
+touch("foo")
+system.time(make("foo"))
+```
+
+The memoised version of `timestamp` is evaluated only at run-time, not at make-time; moreover, the string containing the actual timestamp is computed only once and then cached for future calls, avoiding re-evaluation.
+
+To force re-evaluation of the memoised function exposed by `timestamp`, use `memoise::forget`.
+
+```{r}
+memoise::forget(make("timestamp"))
+touch("foo")
+system.time(make("foo"))
+```
+
+## Lists
+
+It is often useful for a module to expose several (immutable, cf. infra) objects at once by returning a list.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+reset()
+```
+
+```{r}
+"timestamps" %provides% {
+  now <- function() Sys.time()
+  list(
+    origin = structure(0L, class = "Date"),
+    yesterday = function() now() - 86400L,
+    now = now,
+    tomorrow = function() now() + 86400L
+  )
+}
+
+ts %<=% "timestamps"
+
+ts$origin
+ts$yesterday()
+ts$now()
+ts$tomorrow()
+```
+
+## Environments
+
+It is often useful for a module to expose several mutable objects at once by returning an environment.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+reset()
+```
+
+```{r}
+"configuration" %provides% {
+  env <- new.env(parent = emptyenv())
+  env$shape <- "circle"
+  env$color <- "blue"
+  env$size <- 13L
+  env
+}
+
+config %<=% "configuration"
+
+config$color
+config$color <- "red"
+config$color
+```
+
+This kind of module can be used to share mutable data between modules, without polluting the Global Environment.
+
+```{r}
+"widget_A" %requires% list(
+  config = "configuration"
+) %provides% {
+  list(
+    switch_color = function()
+      config$color <- if (config$color == "blue") "red" else "blue"
+  )
+}
+
+"widget_B" %requires% list(
+  config = "configuration"
+) %provides% {
+  list(
+    switch_shape = function()
+      config$shape <- if (config$shape == "circle") "square" else "circle"
+  )
+}
+
+widget_A %<=% "widget_A"
+widget_B %<=% "widget_B"
+
+widget_A$switch_color()
+config$color
+
+widget_B$switch_shape()
+config$shape
+```
+
+The modulr package implements the dedicated syntactic sugar `%provides_options%` for this frequent purpose.
+
+```{r}
+undefine("configuration")
+
+"configuration" %provides_options% list(
+  shape = "circle",
+  color = "blue",
+  size = 13L
+)
+
+config %<=% "configuration"
+widget_A %<=% "widget_A"
+
+config$color
+widget_A$switch_color()
+config$color
+```
+
+It is also possible to use the __shared environment__ associated to every injector:
+
+```{r}
+"widget_B_prime" %provides% {
+  list(
+    switch_shape = function()
+      .SharedEnv$shape <- 
+        if (.SharedEnv$shape == "circle") "square" else "circle"
+  )
+}
+
+widget_B_prime <- make()
+
+.SharedEnv$shape <- "circle"
+widget_B_prime$switch_shape()
+.SharedEnv$shape
+```
+
+
+## Byte-compiled modules
+
+Since a module is allowed to expose any R object, there is no restriction on byte-compiled code.
+
+```{r}
+"hello" %provides% {
+  compiler::compile("Hello, world!")
+}
+
+eval(make())
+```
+
+```{r}
+"lapply_old" %provides% {
+  # Old R version of lapply.
+  function(X, FUN, ...) {
+    FUN <- match.fun(FUN)
+    if (!is.list(X))
+      X <- as.list(X)
+    rval <- vector("list", length(X))
+    for(i in seq(along = X))
+      rval[i] <- list(FUN(X[[i]], ...))
+    names(rval) <- names(X) # keep `names' !
+    return(rval)
+  }
+}
+
+"lapply_old/compiled" %requires% list(
+  lapply_old = "lapply_old"
+) %provides% {
+  compiler::cmpfun(lapply_old)
+}
+
+lapply_old %<=% "lapply_old"
+lapply_old_compiled %<=% "lapply_old/compiled"
+
+system.time(for (i in 1L:10000L) lapply_old(1L:10L, is.null))
+system.time(for (i in 1L:10000L) lapply_old_compiled(1L:10L, is.null))
+```
+
+# Semantic Versioning (SemVer)
+
+The modulr package offers [Semantic Versioning](http://semver.org) capabilities: 
+every module can live in several versions numbers of the form `x.y.z`, where _x_, _y_, 
+and _z_ are the __major__, __minor__, and __patch__ versions, respectively. 
+For instance, `foo#1.2.3` designates module _foo_ in version _1.2.3_.
+
+Given a version number, increment the:
+
+* __major__ version when you make incompatible changes,
+* __minor__ version when you refactor and/or add functionality in a backwards-compatible manner, and
+* __patch__ version when you make backwards-compatible bug fixes.
+
+For instance, `foo#1.2.3` becomes `foo#1.2.4` after a bug fix and `foo#1.3.0` after a functionality bump.
+
+Use:
+
+* `~x.y.z` to refer to the most up-to-date available patch version above _x.y.z_ and __allow bug fixes, but nothing else__,
+* `^x.y.z` or `^x.y` to refer to the most up-to-date available minor version above _x.y_ and __allow bug fixes and new functionalites, but nothing else__, and
+* `>=x.y.z`, `>=x.y`, or `>=x` to refer to the most up-to-date version above _x.y.z_, _x.y_, or _x_, and __live on the edge of developpments__.
+
+Here are some examples among `foo#1.2.3`, `foo#1.2.4`, `foo#1.3.0`:
+
+* `foo#~1.2.0` refers to `foo#1.2.4`,
+* `foo#~1.2.5` refers to nothing,
+* `foo#^1.2.5` and `foo#^1.1` refer to `foo#1.3.0`,
+* `foo#^1.3.1` and `foo#^1.4` refer to nothing, and
+* `foo#>=1.1.0`, `foo#>=1.5`, and `foo#>=0` (aka _latest_) refer to `foo#1.3.0`.
+
+## Initial scenario: no versioning
+
+There is a good chance that your initial scenario contains no versioned module.
+
+```{r}
+"great_module" %provides% {
+  function() {
+    Sys.sleep(1L)
+    "great features"
+  }
+}
+```
+
+```{r}
+"complex_module" %requires% list(
+  great = "great_module"
+) %provides% {
+  function() cat(paste("complex module using", great()))
+}
+```
+
+```{r}
+system.time(make("complex_module")())
+```
+
+In this scenario, `great_module` does what it is supposed to do, but clearly not very efficiently. 
+You then decide to work on a new version that improves its performance.
+
+## Setting-up versioning
+
+First, we clone `great_module` with an initial version number.
+
+```{r}
+"great_module#0.1.0" %clones% "great_module"
+```
+
+We then adapt the requirements where `great_module` is injected as a dependency: for `complex_module`, we decide to accept bug fixes, refactorisations, and new functionalities, as long as the API does not change in an incompatible backward manner.
+
+```{r}
+"complex_module" %requires% list(
+  great = "great_module#^0.1.0"
+) %provides% {
+  function() cat(paste("complex module using", great()))
+}
+```
+
+```{r}
+system.time(make("complex_module")())
+```
+
+Here is the minor bump of `great_module`, which is a little bit more efficient.
+
+```{r}
+"great_module#0.2.0" %provides% {
+  # Improved internals, same interface
+  function() "great optimisd features"
+}
+```
+```{r}
+system.time(make("complex_module")())
+```
+
+And here is the latest bug fix correcting the typo.
+
+```{r}
+"great_module#0.2.1" %provides% {
+  # Bug fix
+  function() "great optimised features"
+}
+```
+
+```{r}
+make("complex_module")()
+```
+
+
+# Location of modules
+
+Modules can be defined in several locations: in-memory, on-disk in its own file or along another module's file, and remotely on GitHub's Gist or via the HTTP(S) protocol.
+
+## In-memory
+
+This is the most direct method to define a module. This is also the most volatile, 
+since the lifespan of the module is limited to the R session.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+reset()
+```
+
+```{r}
+"foo" %provides% "bar"
+lsmod(cols = c("name", "storage", "along", "filepath", "url"))
+```
+
+## On-disk
+
+```{r include=FALSE}
+reset()
+```
+
+This is the way to go when a module is intended to be reused. In such a case, 
+the definition takes place in a dedicated R, R Markdown, or R Sweave file, which 
+path and name are closely related to the module's name.
+
+For instance, the following module definition is stored in the R file `swissknife.R`, under the sub-directory `vendor/tool` of the `./modules` directory.
+
+```{r, code=readLines(file.path(modules_path, "vendor", "tool", "swissknife.R")), eval = FALSE}
+```
+
+When a module is invoked, modulr searches for it in-memory first, then on-disk if necessary. There are several default __root__ places where modulr looks for the module's file: `./modules/`, `./module/`, `./libs/`, `./lib/`, and `./`. This behaviour can be configured with the help of `root_config`.
+
+```{r}
+root_config$get_all()
+```
+
+This explains why modulr finds the module `vendor/tool/swissknife` under the file `./modules/vendor/tool/swissknife.R`.
+
+```{r}
+my_swissknife %<=% "vendor/tool/swissknife"
+```
+
+This also works with R Markdown `.Rmd` and R Sweave `.Rnw` files.
+
+```{r echo=FALSE, comment='', highlight=TRUE}
+cat(readLines(file.path(modules_path, "vendor", "tool", "multitool.Rmd")), sep = "\n")
+```
+
+```{r}
+load_module("vendor/tool/multitool") # load only, do not make
+```
+
+```{r}
+lsmod(cols = c("name", "storage", "along", "filepath", "url"))
+```
+
+Along a principal module, it is possible to define other related modules, for instance mock-ups and testing modules (cf. infra).
+
+## Remote (_modulr gears_)
+
+```{r include=FALSE}
+reset()
+```
+
+Using GitHub's [Gist](https://gist.github.com) is a simple way to share modules with others. To illustrate this, let us consider the following remote module, aka __modulr gear__: [https://gist.github.com/aclemen1/3fcc508cb40ddac6c1e3](https://gist.github.com/aclemen1/3fcc508cb40ddac6c1e3).
+
+```{r, eval=BUILD}
+"modulr/vault" %imports% "https://gist.github.com/aclemen1/3fcc508cb40ddac6c1e3"
+```
+
+Notice that only specifiying the gist ID in `"modulr/vault" %imports% "3fcc508cb40ddac6c1e3"` has the same effect. It is possible to import modules from any URL using the HTTP(S) protocol.
+
+Once imported, a remote module appears to be in-memory defined. 
+
+```{r}
+lsmod(cols = c("name", "storage", "along", "filepath", "url"))
+```
+
+To use a remote module as a dependency, just import it where needed (even in a remote module).
+
+```{r, eval=BUILD}
+"modulr/vault" %imports% "3fcc508cb40ddac6c1e3"
+
+"module/using/a/gear" %requires% list(
+  vault = "modulr/vault"
+) %provides% {
+  vault$decrypt(
+    secret = "TWUnCkRAlP70XvmRlnAFrw==",
+    key = "EaJWzAZjjphu9CoA+MPUVCL8mmMAGp0j6Nbga29kV/A=")
+}
+
+make()
+```
+
+Notice that sharing a module is as easy as sending this one-liner code snippet:
+
+```r
+library(modulr); "modulr/vault#^0.1.0" %imports% "3fcc508cb40ddac6c1e3"
+```
+
+Finally, private Gists and [GitHub Enterprise](https://enterprise.github.com) users are also covered, thanks to GitHub's [Personal Access Tokens](https://github.com/blog/1509-personal-api-tokens) (PAT). For instance, with the GitHub Enterprise instance of the University of Lausanne:
+
+```r
+# Set 'GITHUB_PAT' in your '.Renviron' file or right here:
+# Sys.setenv(GITHUB_PAT = "Your Personal Access Token here")
+
+"modulr/private_GitHubEnterprise_module" %imports% 
+  "https://github.unil.ch/api/v3/gists/1afa4770670975d70806c2153aac50a9"
+```
+
+```{r, eval=BUILD, echo=FALSE}
+(function() {
+  GITHUB_PAT_bak <- Sys.getenv("GITHUB_PAT")
+  Sys.setenv(GITHUB_PAT = Sys.getenv("GITHUB_UNIL_PAT"))
+  on.exit(Sys.setenv(GITHUB_PAT = GITHUB_PAT_bak))
+  "modulr/private_GitHubEnterprise_module" %imports% 
+    "https://github.unil.ch/api/v3/gists/1afa4770670975d70806c2153aac50a9"
+})()
+```
+
+Let us assume that the following module is worth publishing:
+
+```{r, results='hide'}
+"modulr/release_gist_example" %provides% "Hello World!"
+```
+
+To release this module as a modulr gear on GitHub's Gist, simply use `release_gear_as_gist`:
+
+```r
+release_gear_as_gist()
+```
+
+```{r, echo=FALSE, eval=BUILD}
+g <- release_gear_as_gist(browse = FALSE)
+```
+
+```{r, include=FALSE, eval=!BUILD}
+g <- list(html_url = "<URL>")
+```
+
+The module is then publicly available here: `r g[["html_url"]]`.
+
+# Special variables
+
+## `.Last.name`
+
+When a module is defined, touched, or made, its name is always assigned to `.Last.name`.
+The special variable `.Last.name` is also used as a default parameter for `make`, `touch`, and `undefine`.
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+reset()
+```
+
+```{r}
+"foo" %provides% "bar"
+
+.Last.name
+
+make()
+
+touch()
+
+undefine()
+```
+
+## Module's metadata
+
+```{r echo=FALSE, results='hide', message=FALSE, warning=FALSE, cache=FALSE}
+reset()
+```
+
+Every module has access to some of its metadata: name, version, file path (when on-disk), etc. 
+The following module illustrates this feature and is self-explanatory.
+
+```{r, code=readLines(file.path(modules_path, "my", "great", "module", "reflection.R")), eval = FALSE}
+```
+
+```{r}
+with_verbosity(0L, make("my/great/module/reflection"))
+```
+
+
+# The special module `modulr`
+
+The modulr package defines a special module named `modulr` that can be injected in any
+module. The purpose of this special module is to give access to useful helper 
+functions related to the module into which it is injected.
+
+```{r}
+info("modulr")
+```
+
+## Messages
+
+TODO
+
+## Post-evaluation hook
+
+There are situations where a post-evaluation hook is needed. For instance, to define 
+an ephemeral module that can be evaluated only once, or to define a so-called _no-scoped_ 
+module, which looks like a pure singleton, but behaves like a prototype.
+
+```{r}
+"ephemeral" %requires% list(
+  modulr = "modulr"
+) %provides% {
+  modulr$post_evaluation_hook(undefine("ephemeral"))
+  "A butterfly"
+}
+
+make("ephemeral") # returns a butterfly
+try(make("ephemeral"), silent = TRUE) # no more
+cat(geterrmessage())
+```
+
+```{r}
+"no_scoped" %requires% list(
+  modulr = "modulr"
+) %provides% {
+  modulr$post_evaluation_hook(touch("no_scoped"))
+  Sys.time()
+}
+
+make("no_scoped")
+Sys.sleep(1L)
+make("no_scoped")
+```
+
+Notice that the expression passed to the hook is evaluated in the environment in which the module is used. Therefore, a direct call to `.__name__` would not return the name of the intuitively expected module. The following example illustrates how to circumvent this kind of difficulty.
+
+```{r}
+"no_scoped" %requires% list(
+  modulr = "modulr"
+) %provides% {
+  eval(substitute(modulr$post_evaluation_hook(touch(me)), list(me = .__name__)))
+  Sys.time()
+}
+
+make("no_scoped")
+Sys.sleep(1L)
+make("no_scoped")
+```
+
+# Scripting
+
+Turning a bunch of modules working perfectly well together into a script is a 
+very common situation, that can be handled with the help of the following boilerplate code:
+
+```r
+# filepath: ./script.R
+"script" %requires% list(
+  dep_1 = "dependency_1",
+  ...
+) %provides% {
+  function() {
+    # body of the script here
+  }
+}
+
+if (.__name__ == "__main__") 
+  # execute only if sourced/run as a script (à la Python)
+  make()()
+```
+
+# Coding style

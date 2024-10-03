@@ -1,0 +1,74 @@
+Package: modulr
+Type: Package
+Version: 0.1.7.9213
+Date: 2024-09-28
+Title: A Dependency Injection Framework for R
+Description: A Dependency Injection Framework to break down sequential
+    programs into discrete, modular units that are loosely coupled,
+    simple to develop, test, debug, maintain, reuse, and share.
+Author: Alain Clément <alain.clement@unil.ch> [aut, cre, cph]
+Maintainer: Alain Clément <alain.clement@unil.ch>
+URL: https://github.com/aclemen1/modulr
+BugReports: https://github.com/aclemen1/modulr/issues
+Depends:
+    R (>= 3.0.2)
+Imports:
+    knitr (>= 1.11),
+    pooh,
+    assertthat,
+    digest (>= 0.6.5),
+    httr,
+    jsonlite,
+    memoise (>= 1.1.0)
+Suggests:
+    rstudioapi (>= 0.5),
+    devtools,
+    future,
+    PKI,
+    base64enc,
+    magrittr,
+    dplyr,
+    tibble,
+    htmltools,
+    lintr (>= 1.0.0),
+    covr,
+    testthat (>= 1.0.2),
+    networkD3,
+    gistr,
+    rmarkdown,
+    webshot,
+    withr,
+    cranlogs,
+    ggplot2,
+    proto,
+    RColorBrewer,
+    chorddiag,
+    roxygen2
+License: MIT + file LICENSE
+Encoding: UTF-8
+Collate:
+    'addins.R'
+    'assertions.R'
+    'breadcrumbs.R'
+    'browser.R'
+    'modulr.R'
+    'config.R'
+    'dag.R'
+    'define.R'
+    'future.R'
+    'gears.R'
+    'import.R'
+    'info.R'
+    'list.R'
+    'load.R'
+    'make.R'
+    'messages.R'
+    'pkgs.R'
+    'plot.R'
+    'routes.R'
+    'special.R'
+    'stash.R'
+    'zzz.R'
+NeedsCompilation: no
+VignetteBuilder: knitr
+RoxygenNote: 7.2.3

@@ -1,0 +1,25 @@
+navbar:
+  title: "modulr"
+  left:
+    - text: "Home"
+      href: index.html
+    - text: "Why DI for R?"
+      href: articles/motivation.html
+    - text: "Introduction"
+      href: articles/modulr.html
+    - text: "Unit Testing"
+      href: articles/testing.html
+    - text: "Using modulr in packages"
+      href: articles/packages.html
+    - text: "Experimental"
+      href: articles/experimental.html
+    - text: "Reference"
+      href: reference/index.html
+    - text: "News"
+      href: news/index.html
+  right:
+    - icon: fa-github
+      href: https://github.com/aclemen1/modulr
+template:
+  params:
+    ganalytics: UA-36176577-2
